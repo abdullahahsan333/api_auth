@@ -8,6 +8,8 @@ use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
+use Laravel\Sanctum\PersonalAccessToken;
+
 class AuthController extends Controller
 {
     // Register user
@@ -44,9 +46,10 @@ class AuthController extends Controller
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
-
-        // Get device name from header, fallback to 'default'
+        
         $deviceName = $request->header('Device-Name', 'default');
+
+        $user->tokens()->delete();
 
         $token = $user->createToken($deviceName)->plainTextToken;
 
@@ -60,7 +63,18 @@ class AuthController extends Controller
     // Get authenticated user
     public function user(Request $request)
     {
-        return response()->json($request->user());
+        $user = $request->user();
+
+        if (! $user && $user->expires_at != null) {
+            return response()->json(['message' => 'Invalid or expired token'], 401);
+        }
+
+        $validToken = $this->validateToken($token->plainTextToken);
+
+        return response()->json([
+            'message' => 'Token is valid',
+            'user' => $user
+        ]);
     }
 
     // Logout user
@@ -70,4 +84,22 @@ class AuthController extends Controller
 
         return response()->json(['message' => 'Logged out']);
     }
+
+
+    public function validateToken($token)
+    {
+        [$id, $tokenString] = explode('|', $token, 2);
+
+        $accessToken = PersonalAccessToken::find($id);
+
+        if (! $accessToken || ! hash_equals($accessToken->token, hash('sha256', $tokenString))) {
+            return response()->json(['message' => 'Token invalid'], 401);
+        }
+
+        return response()->json([
+            'message' => 'Token valid',
+            'user' => $accessToken->tokenable
+        ]);
+    }
+
 }
